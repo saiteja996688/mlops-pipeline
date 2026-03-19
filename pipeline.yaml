@@ -1,0 +1,60 @@
+# MLOps Pipeline Configuration
+# This pipeline defines the stages for training, evaluation, and deployment
+
+stages:
+  - name: data_ingestion
+    type: spark
+    config:
+      input_path: "s3://data-lake/raw/customers/"
+      output_path: "s3://data-lake/processed/customers/"
+      format: parquet
+      partition_columns:
+        - date
+
+  - name: feature_engineering
+    type: spark
+    config:
+      input_path: "s3://data-lake/processed/customers/"
+      output_path: "s3://data-lake/features/"
+      transformations:
+        - encoding: onehot
+        - scaling: standard
+        - aggregation: groupby_user
+
+  - name: model_training
+    type: python
+    script: src/model_trainer.py
+    config:
+      model_type: random_forest
+      hyperparameters:
+        n_estimators: 100
+        max_depth: 10
+      experiment_name: customer_churn_v1
+
+  - name: model_evaluation
+    type: python
+    config:
+      metrics:
+        - accuracy
+        - f1_score
+        - auc_roc
+      threshold: 0.85
+      artifact_path: "s3://model-registry/"
+
+  - name: model_deployment
+    type: container
+    config:
+      registry: ecr
+      endpoint_name: churn-predictor
+      instance_type: ml.t3.medium
+      auto_scaling:
+        min_instances: 1
+        max_instances: 5
+
+  - name: monitoring
+    type: lambda
+    config:
+      trigger: scheduled
+      cron: "0 */6 * * *"
+      alert_threshold: 0.05
+      notification: sns
